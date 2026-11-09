@@ -1,0 +1,778 @@
+{%- comment -%}
+  Free Shipping Bar: cart drawer progress bar with up to 4 reward steps.
+  https://github.com/BeauchampAndrew/shopify-free-shipping-bar
+  One portable section file. Install and customization notes: README.md (people) and AGENTS.md (AI agents).
+
+  The section renders a hidden <free-shipping-bar> wherever it is placed (footer or header group).
+  Its JS builds the bar UI and mounts it inside the theme's cart drawer, then keeps it in sync
+  with the cart. Progress counts the cart BEFORE discounts so it matches Shopify's own
+  automatic-discount minimums. The free gift is added/removed by the bar; the 100% discount on it
+  comes from a Shopify automatic "Buy X get Y" discount the merchant sets up.
+{%- endcomment -%}
+
+{%- liquid
+  assign gift = section.settings.gift_product
+  assign gift_variant = gift.selected_or_first_available_variant
+  assign gift_step = section.settings.gift_step | plus: 0
+-%}
+
+<free-shipping-bar data-section-id="{{ section.id }}">
+  {%- if request.design_mode -%}
+    <p class="fsb-editor-note">
+      Free shipping bar: open the cart drawer to see it. Settings are in this section's sidebar.
+    </p>
+  {%- endif -%}
+  <script type="application/json" data-fsb-config>
+    {
+      "style": {{ section.settings.style | json }},
+      "moneyFormat": {{ shop.money_format | json }},
+      "steps": [
+        {%- for i in (1..4) -%}
+          {%- liquid
+            assign k_amount = 'step_' | append: i | append: '_amount'
+            assign k_label = 'step_' | append: i | append: '_label'
+            assign k_reward = 'step_' | append: i | append: '_reward'
+            assign k_icon = 'step_' | append: i | append: '_icon'
+          -%}
+          {
+            "amount": {{ section.settings[k_amount] | default: 0 | json }},
+            "label": {{ section.settings[k_label] | json }},
+            "reward": {{ section.settings[k_reward] | json }},
+            "icon": {{ section.settings[k_icon] | json }},
+            "isGift": {% if gift_step == i and gift != blank %}true{% else %}false{% endif %}
+          }{% unless forloop.last %},{% endunless %}
+        {%- endfor -%}
+      ],
+      "gift": {%- if gift != blank and gift_variant -%}
+        {
+          "variantId": {{ gift_variant.id | json }},
+          "handle": {{ gift.handle | json }},
+          "title": {{ gift.title | json }},
+          "image": {{ gift.featured_image | image_url: width: 160 | json }},
+          "available": {{ gift_variant.available | json }}
+        }
+      {%- else -%}null{%- endif -%},
+      "text": {
+        "progress": {{ section.settings.msg_progress | json }},
+        "complete": {{ section.settings.msg_complete | json }},
+        "giftLocked": {{ section.settings.gift_locked | json }},
+        "giftUnlocked": {{ section.settings.gift_unlocked | json }},
+        "giftBadge": {{ section.settings.gift_badge | json }},
+        "savings": {{ section.settings.savings_text | json }}
+      },
+      "showSavings": {{ section.settings.show_savings | json }},
+      "showWhenEmpty": {{ section.settings.show_when_empty | json }},
+      "confetti": {{ section.settings.confetti | json }},
+      "colors": {
+        "accent": {{ section.settings.color_accent | json }},
+        "track": {{ section.settings.color_track | json }},
+        "done": {{ section.settings.color_done | json }},
+        "bg": {{ section.settings.color_bg | json }},
+        "text": {{ section.settings.color_text | json }}
+      },
+      "selectors": {
+        "drawer": {{ section.settings.drawer_selector | json }},
+        "mount": {{ section.settings.mount_selector | json }},
+        "row": {{ section.settings.row_selector | json }},
+        "total": {{ section.settings.total_selector | json }}
+      }
+    }
+  </script>
+</free-shipping-bar>
+
+{% stylesheet %}
+  free-shipping-bar { display: block; }
+  .fsb-editor-note { margin: 0; padding: 12px 16px; font-size: 13px; opacity: .7; text-align: center; }
+
+  .fsb {
+    --fsb-accent: #d62f2f; --fsb-track: #e7e1d9; --fsb-done: #2e7d4f; --fsb-bg: #faf5f0; --fsb-text: #1f1f1f;
+    position: relative; z-index: 20; flex: none;
+    background: var(--fsb-bg); color: var(--fsb-text);
+    font-size: 14px; line-height: 1.35;
+  }
+  .fsb[hidden] { display: none; }
+  .fsb *, .fsb *::before, .fsb *::after { box-sizing: border-box; }
+  .fsb__head { padding: 14px 16px 12px; }
+  .fsb__msg { margin: 0 0 12px; text-align: center; font-weight: 600; font-size: 15px; min-height: 20px; }
+  .fsb__msg b { color: var(--fsb-accent); }
+  .fsb__msg.is-complete { color: var(--fsb-done); }
+  .fsb__ico { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; flex: none; }
+  .fsb__ico svg { width: 100%; height: 100%; display: block; }
+
+  /* Style A: milestone track */
+  .fsb__track { position: relative; height: 10px; margin: 14px 18px 0 6px; border-radius: 99px; background: var(--fsb-track); }
+  .fsb__fill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--fsb-accent);
+    background-image: repeating-linear-gradient(-45deg, rgba(255,255,255,.18) 0 6px, transparent 6px 12px);
+    transition: width .6s cubic-bezier(.3,.7,.2,1); }
+  .fsb__node { position: absolute; top: 50%; width: 32px; height: 32px; margin: -16px 0 0 -16px; border-radius: 50%;
+    display: grid; place-items: center; background: var(--fsb-track); color: #7a756d; transition: background .3s, color .3s; }
+  .fsb__node.is-on { background: var(--fsb-accent); color: #fff; }
+  .fsb__labels { position: relative; height: 30px; margin: 18px 18px 0 6px; font-size: 12px; line-height: 1.2; text-align: center; opacity: .75; }
+  .fsb__labels span { position: absolute; width: 70px; transform: translateX(-50%); }
+  .fsb__labels span:last-child { transform: translateX(-70%); }
+  .fsb__labels span.is-on { color: var(--fsb-done); font-weight: 600; opacity: 1; }
+  .fsb__labels:has(span.is-on) { opacity: 1; }
+
+  /* Style B: step segments */
+  .fsb__segs { display: grid; grid-auto-columns: 1fr; grid-auto-flow: column; gap: 6px; }
+  .fsb__seg { text-align: center; font-size: 11.5px; opacity: .75; }
+  .fsb__seg.is-on { opacity: 1; font-weight: 600; }
+  .fsb__seg .fsb__ico { width: 18px; height: 18px; display: block; margin: 0 auto 4px; }
+  .fsb__seg .fsb__ico--check { display: none; color: var(--fsb-done); }
+  .fsb__seg.is-on .fsb__ico--step { display: none; }
+  .fsb__seg.is-on .fsb__ico--check { display: block; }
+  .fsb__segbar { height: 8px; margin-top: 6px; border-radius: 99px; background: var(--fsb-track); overflow: hidden; }
+  .fsb__segbar i { display: block; height: 100%; width: 0; background: var(--fsb-accent); transition: width .5s; }
+  .fsb__segamt { margin-top: 4px; font-size: 11px; font-weight: 400; opacity: .8; }
+
+  .fsb__pop { animation: fsb-pop .5s; }
+
+  /* Locked gift row */
+  .fsb__gift { display: flex; align-items: center; gap: 12px; margin: 0 16px 12px; padding: 10px;
+    border: 1px dashed rgba(0,0,0,.2); border-radius: 10px; background: #fff; overflow: hidden; max-height: 100px;
+    transition: max-height .45s ease, margin .45s, padding .45s, opacity .45s, border-color .3s, background .3s; }
+  .fsb__gift[hidden] { display: none; }
+  .fsb__thumb { position: relative; width: 46px; height: 46px; flex: none; border-radius: 8px; background: #eee;
+    filter: grayscale(1); opacity: .55; transition: filter .5s, opacity .5s; }
+  .fsb__thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: block; }
+  .fsb__lock { position: absolute; right: -5px; bottom: -5px; width: 20px; height: 20px; border-radius: 50%;
+    display: grid; place-items: center; background: var(--fsb-text); color: #fff; }
+  .fsb__lock .fsb__ico { width: 11px; height: 11px; }
+  .fsb__gtxt { font-size: 13px; min-width: 0; }
+  .fsb__gtxt strong { display: block; font-size: 14px; }
+  .fsb__gtxt b { color: var(--fsb-done); }
+  .fsb__tag, .fsb-badge { margin-left: auto; padding: 5px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;
+    letter-spacing: .04em; white-space: nowrap; background: #edf3ee; color: var(--fsb-done); }
+  .fsb__gift.is-unlocking { border-style: solid; border-color: var(--fsb-done); background: #f2f8f3; }
+  .fsb__gift.is-unlocking .fsb__thumb { filter: none; opacity: 1; animation: fsb-pop .6s; }
+  .fsb__gift.is-unlocking .fsb__lock { background: var(--fsb-done); animation: fsb-pop .5s; }
+  .fsb__gift.is-gone { max-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; opacity: 0; border-width: 0; }
+
+  .fsb__savefallback { margin: 0; padding: 0 16px 12px; text-align: center; font-size: 13px; color: var(--fsb-done); }
+  .fsb__savefallback[hidden] { display: none; }
+
+  /* Decorations applied to the theme's own cart markup */
+  .fsb-gift-row .fsb-hidden { visibility: hidden !important; }
+  .fsb-badge { display: inline-block; margin: 6px 0 0; }
+  .fsb-was { margin-right: 8px; font-weight: 400; opacity: .6; text-decoration: line-through; }
+  .fsb-saving { margin: 4px 0 0; text-align: right; font-size: 13px; color: #2e7d4f; }
+
+  /* Confetti */
+  .fsb-fx { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; overflow: hidden; z-index: 30; }
+  .fsb-fx i { position: absolute; width: 6px; height: 9px; border-radius: 2px; animation: fsb-burst .9s ease-out forwards; }
+  .fsb-fx i.is-fall { animation: fsb-fall var(--d) cubic-bezier(.25,.5,.45,1) var(--dl) both; }
+
+  @keyframes fsb-pop { 0% { transform: scale(1); } 40% { transform: scale(1.3); } 100% { transform: scale(1); } }
+  @keyframes fsb-burst { 0% { transform: translate(0,0) rotate(0); opacity: 1; } 100% { transform: translate(var(--x), var(--y)) rotate(var(--r)); opacity: 0; } }
+  @keyframes fsb-fall { 0% { transform: translate(0,0) rotate(0); opacity: 1; } 80% { opacity: 1; } 100% { transform: translate(var(--x), var(--y)) rotate(var(--r)); opacity: 0; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fsb *, .fsb-fx * { animation: none !important; transition: none !important; }
+  }
+{% endstylesheet %}
+
+{% javascript %}
+  (function () {
+    if (customElements.get('free-shipping-bar')) return;
+
+    var ICONS = {
+      truck: '<path fill="currentColor" d="M3 6h11v9h-1.2a2.5 2.5 0 0 0-4.6 0H3zM15 9h3.4L21 12v3h-.7a2.5 2.5 0 0 0-4.6 0H15zM8 17a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0m9.5 0a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0"/>',
+      percent: '<path fill="currentColor" d="M12 2l2.2 1.6 2.7-.2.9 2.6 2.3 1.4-.6 2.6 1.1 2.5-2 1.8-.4 2.7-2.6.6-1.6 2.2-2.5-1-2.5 1-1.6-2.2-2.6-.6-.4-2.7-2-1.8 1.1-2.5-.6-2.6 2.3-1.4.9-2.6 2.7.2zM9.2 8a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6m5.6 5.4a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6M14.6 8 8.4 15.1l1 .9L15.6 8.9z" fill-rule="evenodd"/>',
+      gift: '<path fill="currentColor" d="M4 10h16v3H4zM5 13h6v8H5zm8 0h6v8h-6zM11 10h2v11h-2zM12 9C10 5 6 5 6 7.5 6 9 8 9 12 9m0 0c2-4 6-4 6-1.5C18 9 16 9 12 9"/>',
+      star: '<path fill="currentColor" d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+      heart: '<path fill="currentColor" d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10"/>',
+      lock: '<path fill="currentColor" d="M7 10V8a5 5 0 0 1 10 0v2h1v11H6V10zm2 0h6V8a3 3 0 0 0-6 0z"/>',
+      check: '<path fill="currentColor" d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7z"/>'
+    };
+    var COLORS = ['#e4572e', '#f3a712', '#2e7d4f', '#2e5bd3', '#a855f7', '#ec4899'];
+    var GIFT_PROP = '_fsb_gift';
+    var DECLINED_KEY = 'fsb-gift-declined';
+
+    var DEFAULTS = {
+      drawer: 'cart-drawer-component, cart-drawer, #CartDrawer, #cart-drawer, .cart-drawer',
+      mount: 'cart-items-component, cart-drawer-items, .cart-drawer__items, .drawer__contents, form[action*="/cart"]',
+      row: '[data-key], tr, li, [class*="cart-item"], [class*="line-item"]',
+      total: '.cart-totals__total-value, .totals__total-value, .totals__subtotal-value, [class*="total"][class*="value"]'
+    };
+
+    function icon(name, extra) {
+      return '<span class="fsb__ico' + (extra ? ' ' + extra : '') + '"><svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || ICONS.star) + '</svg></span>';
+    }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+    function reducedMotion() {
+      return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+    function root() {
+      return (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || '/';
+    }
+    function isGiftLine(item) {
+      return !!(item.properties && item.properties[GIFT_PROP]);
+    }
+    function store(action, value) {
+      try {
+        if (action === 'get') return sessionStorage.getItem(DECLINED_KEY);
+        if (action === 'set') sessionStorage.setItem(DECLINED_KEY, value);
+        if (action === 'del') sessionStorage.removeItem(DECLINED_KEY);
+      } catch (e) {}
+      return null;
+    }
+
+    // Tell us about cart changes made by any theme or app code that uses fetch.
+    function patchFetch() {
+      if (window.__fsbFetchPatched || !window.fetch) return;
+      window.__fsbFetchPatched = true;
+      var orig = window.fetch;
+      window.fetch = function (input, init) {
+        var url = '';
+        try { url = input instanceof Request ? input.url : String(input); } catch (e) {}
+        var ours = false;
+        try {
+          var h = init && init.headers;
+          ours = !!(h && (h['X-FSB'] || (typeof h.get === 'function' && h.get('X-FSB'))));
+        } catch (e) {}
+        var p = orig.apply(this, arguments);
+        if (!ours && /\/cart\/(add|change|update|clear)(\.js)?(\?|$)/.test(url)) {
+          p.then(function () { document.dispatchEvent(new CustomEvent('fsb:cart-changed')); }, function () {});
+        }
+        return p;
+      };
+    }
+
+    class FreeShippingBar extends HTMLElement {
+      connectedCallback() {
+        if (this._ready) return;
+        var cfgEl = this.querySelector('[data-fsb-config]');
+        if (!cfgEl) return;
+        try { this.cfg = JSON.parse(cfgEl.textContent); } catch (e) { console.warn('[free-shipping-bar] bad config', e); return; }
+        this._ready = true;
+
+        var cfg = this.cfg;
+        this.sel = {};
+        for (var k in DEFAULTS) this.sel[k] = (cfg.selectors && cfg.selectors[k] && cfg.selectors[k].trim()) || DEFAULTS[k];
+        this.steps = (cfg.steps || []).filter(function (s) { return Number(s.amount) > 0; })
+          .map(function (s) { s.amount = Number(s.amount); return s; })
+          .sort(function (a, b) { return a.amount - b.amount; });
+        if (!this.steps.length) return;
+        this.giftStep = this.steps.filter(function (s) { return s.isGift; })[0] || null;
+        this.gift = this.giftStep && cfg.gift ? cfg.gift : null;
+        this.prev = null;
+        this.cart = null;
+        this.busy = false;
+        this.hadGift = false;
+        this.giftError = false;
+
+        this.ui = this.buildUI();
+        var owner = this.dataset.sectionId;
+        var self = this;
+        document.querySelectorAll('.fsb[data-fsb-owner="' + owner + '"]').forEach(function (n) { if (n !== self.ui) n.remove(); });
+
+        this.onMutate = function (list) {
+          for (var i = 0; i < list.length; i++) {
+            var t = list[i].target;
+            if (t.nodeType === 1 && !self.ui.contains(t) && !(t.closest && t.closest('.fsb-fx'))) { self.schedule(); return; }
+          }
+        };
+        this.observer = new MutationObserver(this.onMutate);
+        this.observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+
+        this.onLinesUpdate = function (e) {
+          var p = e && e.promise && typeof e.promise.then === 'function' ? e.promise : Promise.resolve(null);
+          p.then(function (r) {
+            if (r && r.detail && r.detail.source === 'free-shipping-bar') return;
+            self.refresh();
+          }, function () {});
+        };
+        this.onAnyChange = function () { self.refresh(); };
+        document.addEventListener('shopify:cart:lines-update', this.onLinesUpdate);
+        document.addEventListener('fsb:cart-changed', this.onAnyChange);
+        document.addEventListener('cart:updated', this.onAnyChange);
+        patchFetch();
+
+        this.mount();
+        this.refresh();
+      }
+
+      disconnectedCallback() {
+        if (!this._ready) return;
+        this._ready = false;
+        if (this.observer) this.observer.disconnect();
+        document.removeEventListener('shopify:cart:lines-update', this.onLinesUpdate);
+        document.removeEventListener('fsb:cart-changed', this.onAnyChange);
+        document.removeEventListener('cart:updated', this.onAnyChange);
+        if (this.ui) this.ui.remove();
+      }
+
+      /* ---------- money ---------- */
+      money(cents, trim) {
+        var fmt = String(this.cfg.moneyFormat || ('$' + '{' + '{amount}' + '}')).replace(/<[^>]*>/g, '');
+        var m = fmt.match(/\{\{\s*(\w+)\s*\}\}/);
+        var key = m ? m[1] : 'amount';
+        function fix(n, d, ts, ds) {
+          var parts = (n / 100).toFixed(d).split('.');
+          parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ts);
+          return parts.join(ds);
+        }
+        var v;
+        switch (key) {
+          case 'amount_no_decimals': v = fix(cents, 0, ',', '.'); break;
+          case 'amount_with_comma_separator': v = fix(cents, 2, '.', ','); break;
+          case 'amount_no_decimals_with_comma_separator': v = fix(cents, 0, '.', ','); break;
+          case 'amount_with_apostrophe_separator': v = fix(cents, 2, "'", '.'); break;
+          default: v = fix(cents, 2, ',', '.');
+        }
+        if (trim && cents % 100 === 0) v = v.replace(/[.,]00$/, '');
+        return m ? fmt.replace(m[0], v) : v;
+      }
+      threshold(step) {
+        var rate = parseFloat(window.Shopify && window.Shopify.currency && window.Shopify.currency.rate) || 1;
+        return Math.round(step.amount * 100 * rate);
+      }
+
+      /* ---------- UI ---------- */
+      buildUI() {
+        var cfg = this.cfg, steps = this.steps, n = steps.length, self = this;
+        var ui = document.createElement('div');
+        ui.className = 'fsb';
+        ui.hidden = true;
+        ui.dataset.fsbOwner = this.dataset.sectionId;
+        ui.dataset.style = cfg.style === 'segments' ? 'segments' : 'track';
+        var c = cfg.colors || {};
+        if (c.accent) ui.style.setProperty('--fsb-accent', c.accent);
+        if (c.track) ui.style.setProperty('--fsb-track', c.track);
+        if (c.done) ui.style.setProperty('--fsb-done', c.done);
+        if (c.bg) ui.style.setProperty('--fsb-bg', c.bg);
+        if (c.text) ui.style.setProperty('--fsb-text', c.text);
+
+        var bar;
+        if (ui.dataset.style === 'segments') {
+          bar = '<div class="fsb__segs">' + steps.map(function (s) {
+            return '<div class="fsb__seg">' + icon(s.icon, 'fsb__ico--step') + icon('check', 'fsb__ico--check') + esc(s.label) +
+              '<div class="fsb__segbar"><i></i></div><div class="fsb__segamt">' + esc(self.money(self.threshold(s), true)) + '</div></div>';
+          }).join('') + '</div>';
+        } else {
+          bar = '<div class="fsb__track"><div class="fsb__fill" style="width:0"></div>' + steps.map(function (s, i) {
+            return '<div class="fsb__node" style="left:' + ((i + 1) / n * 100) + '%">' + icon(s.icon) + '</div>';
+          }).join('') + '</div><div class="fsb__labels">' + steps.map(function (s, i) {
+            return '<span style="left:' + ((i + 1) / n * 100) + '%">' + esc(s.label) + '</span>';
+          }).join('') + '</div>';
+        }
+
+        var gift = '';
+        if (this.gift) {
+          gift = '<div class="fsb__gift" hidden><div class="fsb__thumb">' +
+            (this.gift.image ? '<img src="' + esc(this.gift.image) + '" alt="" loading="lazy" width="46" height="46">' : '') +
+            '<span class="fsb__lock">' + icon('lock') + '</span></div>' +
+            '<div class="fsb__gtxt"><strong>' + esc(this.gift.title) + '</strong><span class="fsb__gmsg"></span></div>' +
+            '<span class="fsb__tag">' + esc(cfg.text.giftBadge) + '</span></div>';
+        }
+
+        ui.innerHTML = '<div class="fsb__head"><p class="fsb__msg" aria-live="polite"></p>' +
+          '<div class="fsb__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">' + bar + '</div></div>' +
+          gift + '<p class="fsb__savefallback" hidden></p>';
+        return ui;
+      }
+
+      findDrawer() {
+        try { return document.querySelector(this.sel.drawer); } catch (e) { return null; }
+      }
+
+      mount() {
+        var drawer = this.findDrawer();
+        if (!drawer) return false;
+        if (this.ui.isConnected && drawer.contains(this.ui)) return true;
+        var anchor = null;
+        try { anchor = drawer.querySelector(this.sel.mount); } catch (e) {}
+        if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(this.ui, anchor);
+        else drawer.prepend(this.ui);
+        return true;
+      }
+
+      schedule() {
+        var self = this;
+        if (this._raf) return;
+        this._raf = requestAnimationFrame(function () {
+          self._raf = null;
+          self.mount();
+          self.decorate();
+        });
+      }
+
+      refresh() {
+        var self = this;
+        clearTimeout(this._t);
+        this._t = setTimeout(function () {
+          fetch(root() + 'cart.js', { headers: { Accept: 'application/json', 'X-FSB': '1' } })
+            .then(function (r) { return r.json(); })
+            .then(function (cart) { self.update(cart); })
+            .catch(function (e) { console.warn('[free-shipping-bar] cart fetch failed', e); });
+        }, 60);
+      }
+
+      update(cart) {
+        this.cart = cart;
+        var self = this;
+        var giftLines = cart.items.filter(isGiftLine);
+        var progress = cart.items.filter(function (i) { return !isGiftLine(i); })
+          .reduce(function (sum, i) { return sum + (i.original_line_price != null ? i.original_line_price : i.final_line_price); }, 0);
+
+        this.mount();
+        this.render(progress, cart);
+        if (this.prev !== null) this.celebrate(this.prev, progress);
+        this.prev = progress;
+        this.decorate();
+        this.syncGift(progress, giftLines);
+      }
+
+      render(progress, cart) {
+        var ui = this.ui, steps = this.steps, n = steps.length, self = this, cfg = this.cfg;
+        var nonGiftCount = cart.items.filter(function (i) { return !isGiftLine(i); }).length;
+        ui.hidden = !cfg.showWhenEmpty && nonGiftCount === 0;
+
+        var next = null;
+        for (var i = 0; i < n; i++) if (progress < this.threshold(steps[i])) { next = steps[i]; break; }
+        var msg = ui.querySelector('.fsb__msg');
+        if (next) {
+          msg.classList.remove('is-complete');
+          msg.innerHTML = esc(cfg.text.progress)
+            .replace('[amount]', '<b>' + esc(this.money(this.threshold(next) - progress, true)) + '</b>')
+            .replace('[reward]', esc(next.reward || next.label));
+        } else {
+          msg.classList.add('is-complete');
+          msg.innerHTML = icon('check') + ' ' + esc(cfg.text.complete);
+        }
+
+        // overall percent with evenly spaced steps
+        var pct = 0;
+        for (var j = 0; j < n; j++) {
+          var lo = j ? this.threshold(steps[j - 1]) : 0, hi = this.threshold(steps[j]);
+          if (progress >= hi) pct += 100 / n;
+          else { pct += (100 / n) * Math.max(0, progress - lo) / (hi - lo); break; }
+        }
+        ui.querySelector('.fsb__bar').setAttribute('aria-valuenow', String(Math.round(pct)));
+
+        if (ui.dataset.style === 'segments') {
+          ui.querySelectorAll('.fsb__seg').forEach(function (seg, k) {
+            var lo2 = k ? self.threshold(steps[k - 1]) : 0, hi2 = self.threshold(steps[k]);
+            var w = Math.max(0, Math.min(1, (progress - lo2) / (hi2 - lo2))) * 100;
+            seg.classList.toggle('is-on', progress >= hi2);
+            seg.querySelector('.fsb__segbar i').style.width = w + '%';
+          });
+        } else {
+          ui.querySelector('.fsb__fill').style.width = pct + '%';
+          ui.querySelectorAll('.fsb__node').forEach(function (node, k) { node.classList.toggle('is-on', progress >= self.threshold(steps[k])); });
+          ui.querySelectorAll('.fsb__labels span').forEach(function (s, k) { s.classList.toggle('is-on', progress >= self.threshold(steps[k])); });
+        }
+
+        // locked gift row
+        var row = ui.querySelector('.fsb__gift');
+        if (row) {
+          var t = this.threshold(this.giftStep);
+          var crossedUp = this.prev !== null && this.prev < t && progress >= t;
+          if (progress < t) {
+            clearTimeout(this._giftT);
+            row.classList.remove('is-unlocking', 'is-gone');
+            row.hidden = false;
+            row.querySelector('.fsb__gmsg').innerHTML = esc(cfg.text.giftLocked).replace('[amount]', '<b>' + esc(this.money(t - progress, true)) + '</b>');
+          } else if (crossedUp) {
+            row.hidden = false;
+            row.classList.add('is-unlocking');
+            row.querySelector('.fsb__gmsg').innerHTML = '<b>' + esc(cfg.text.giftUnlocked) + '</b>';
+            clearTimeout(this._giftT);
+            this._giftT = setTimeout(function () { row.classList.add('is-gone'); }, 2200);
+          } else if (!row.classList.contains('is-unlocking')) {
+            row.hidden = true;
+          }
+        }
+
+        // savings fallback (only used when the theme's total can't be found)
+        var fb = ui.querySelector('.fsb__savefallback');
+        var saving = (cart.original_total_price || 0) - (cart.total_price || 0);
+        this._saving = saving;
+        fb.hidden = true;
+        if (cfg.showSavings && saving > 0 && !this.findTotal()) {
+          fb.hidden = false;
+          fb.innerHTML = esc(cfg.text.savings).replace('[amount]', '<b>' + esc(this.money(saving)) + '</b>');
+        }
+      }
+
+      /* ---------- confetti ---------- */
+      celebrate(prev, now) {
+        if (!this.cfg.confetti || reducedMotion() || this.ui.hidden) return;
+        var top = -1;
+        for (var i = 0; i < this.steps.length; i++) {
+          var t = this.threshold(this.steps[i]);
+          if (prev < t && now >= t) top = i;
+        }
+        if (top < 0) return;
+        if (top === this.steps.length - 1) this.shower();
+        else {
+          var el = this.ui.querySelectorAll(this.ui.dataset.style === 'segments' ? '.fsb__seg .fsb__ico--check' : '.fsb__node')[top];
+          if (el) { el.classList.remove('fsb__pop'); void el.offsetWidth; el.classList.add('fsb__pop'); }
+          this.burst(el);
+        }
+      }
+      layer() {
+        var fx = document.createElement('div');
+        fx.className = 'fsb-fx';
+        var parent = this.ui.parentElement;
+        var h = parent ? parent.getBoundingClientRect().bottom - this.ui.getBoundingClientRect().top : 400;
+        fx.style.height = Math.max(200, h) + 'px';
+        this.ui.appendChild(fx);
+        return fx;
+      }
+      burst(el) {
+        if (!el) return;
+        var fx = this.layer();
+        var ub = this.ui.getBoundingClientRect(), eb = el.getBoundingClientRect();
+        var cx = eb.left - ub.left + eb.width / 2, cy = eb.top - ub.top + eb.height / 2;
+        for (var k = 0; k < 18; k++) {
+          var p = document.createElement('i'), a = Math.random() * Math.PI * 2, d = 24 + Math.random() * 40;
+          p.style.cssText = 'left:' + cx + 'px;top:' + cy + 'px;background:' + COLORS[k % 6] +
+            ';--x:' + (Math.cos(a) * d) + 'px;--y:' + (Math.sin(a) * d + 10) + 'px;--r:' + (Math.random() * 540) + 'deg';
+          fx.appendChild(p);
+        }
+        setTimeout(function () { fx.remove(); }, 1000);
+      }
+      shower() {
+        var fx = this.layer(), w = this.ui.clientWidth, h = parseFloat(fx.style.height);
+        for (var k = 0; k < 90; k++) {
+          var p = document.createElement('i'), big = Math.random() < 0.35;
+          p.className = 'is-fall';
+          p.style.cssText = 'left:' + (Math.random() * w) + 'px;top:' + (-10 - Math.random() * 30) + 'px;background:' + COLORS[k % 6] +
+            ';width:' + (big ? 8 : 6) + 'px;height:' + (big ? 12 : 9) + 'px;--x:' + ((Math.random() - 0.5) * 90) + 'px;--y:' +
+            (h * 0.55 + Math.random() * h * 0.45) + 'px;--r:' + ((Math.random() - 0.5) * 1080) + 'deg;--d:' +
+            (1.6 + Math.random() * 1.2) + 's;--dl:' + (Math.random() * 0.5) + 's';
+          fx.appendChild(p);
+        }
+        setTimeout(function () { fx.remove(); }, 3400);
+      }
+
+      /* ---------- free gift ---------- */
+      syncGift(progress, giftLines) {
+        if (!this.gift || this.busy || this.giftError) return;
+        var t = this.threshold(this.giftStep), unlocked = progress >= t, self = this;
+        if (!unlocked) store('del');
+
+        if (unlocked && !giftLines.length) {
+          if (this.hadGift) store('set', '1'); // shopper removed it themselves: don't force it back
+          this.hadGift = false;
+          if (store('get') === '1' || !this.gift.available) return;
+          this.cartRequest('add', { items: [{ id: this.gift.variantId, quantity: 1, properties: (function () { var o = {}; o[GIFT_PROP] = '1'; return o; })() }] },
+            [{ merchandiseId: String(this.gift.variantId), quantity: 1 }]);
+          return;
+        }
+        if (!unlocked && giftLines.length) {
+          this.hadGift = false;
+          this.cartRequest('change', { id: giftLines[0].key, quantity: 0 }, [{ id: giftLines[0].key, quantity: 0 }]);
+          return;
+        }
+        if (giftLines.length && giftLines[0].quantity > 1) {
+          this.cartRequest('change', { id: giftLines[0].key, quantity: 1 }, [{ id: giftLines[0].key, quantity: 1 }]);
+          return;
+        }
+        this.hadGift = giftLines.length > 0;
+      }
+
+      cartRequest(kind, body, lines) {
+        var self = this;
+        this.busy = true;
+        var ids = [];
+        document.querySelectorAll('cart-items-component[data-section-id]').forEach(function (el) { ids.push(el.dataset.sectionId); });
+        if (ids.length) body.sections = ids.join(',');
+        var headers = { 'Content-Type': 'application/json', Accept: 'application/json', 'X-FSB': '1' };
+        fetch(root() + (kind === 'add' ? 'cart/add.js' : 'cart/change.js'), { method: 'POST', headers: headers, body: JSON.stringify(body) })
+          .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw j; return j; }); })
+          .then(function (res) {
+            var cartP = kind === 'add'
+              ? fetch(root() + 'cart.js', { headers: { Accept: 'application/json', 'X-FSB': '1' } }).then(function (r) { return r.json(); })
+              : Promise.resolve(res);
+            return cartP.then(function (cart) {
+              self.busy = false;
+              if (kind === 'add') self.hadGift = true;
+              self.notifyTheme(kind === 'add' ? 'add' : (body.quantity === 0 ? 'remove' : 'update'), lines, res.sections, cart);
+              self.update(cart);
+            });
+          })
+          .catch(function (err) {
+            self.busy = false;
+            self.giftError = true;
+            console.warn('[free-shipping-bar] gift update failed', err);
+          });
+      }
+
+      // Ask the theme to redraw its cart. Horizon (and other themes on Shopify's standard events) listen
+      // for shopify:cart:lines-update; the generic events cover themes that listen for their own names.
+      notifyTheme(action, lines, sections, cart) {
+        var payloadDetail = { sections: sections || {}, items: cart.items, source: 'free-shipping-bar' };
+        import('https://cdn.shopify.com/storefront/standard-events.js')
+          .then(function (m) {
+            var E = m.CartLinesUpdateEvent;
+            if (!E) throw new Error('no CartLinesUpdateEvent');
+            var c = typeof E.createCartFromAjaxResponse === 'function' ? E.createCartFromAjaxResponse(cart) : null;
+            document.dispatchEvent(new E({ action: action, context: 'cart', lines: lines, promise: Promise.resolve({ cart: c, detail: payloadDetail }) }));
+          })
+          .catch(function () {
+            var ev = new CustomEvent('shopify:cart:lines-update', { bubbles: true });
+            ev.action = action; ev.context = 'cart'; ev.lines = lines;
+            ev.promise = Promise.resolve({ cart: null, detail: payloadDetail });
+            document.dispatchEvent(ev);
+          });
+        document.dispatchEvent(new CustomEvent('cart:refresh', { bubbles: true, detail: { cart: cart, source: 'free-shipping-bar' } }));
+      }
+
+      /* ---------- decorate the theme's own cart markup ---------- */
+      findTotal() {
+        var drawer = this.findDrawer();
+        if (!drawer) return null;
+        // Try each selector in priority order (a plain selector list would return whichever matches first in the DOM).
+        var list = this.sel.total.split(',');
+        for (var i = 0; i < list.length; i++) {
+          try {
+            var el = drawer.querySelector(list[i].trim());
+            if (el && !this.ui.contains(el)) return el;
+          } catch (e) {}
+        }
+        return null;
+      }
+
+      decorate() {
+        var cart = this.cart, drawer = this.findDrawer();
+        if (!cart || !drawer) return;
+        var cfg = this.cfg, self = this;
+
+        // gift row: badge + hide quantity controls
+        var giftLine = cart.items.filter(isGiftLine)[0];
+        if (this.gift && giftLine) {
+          var row = null;
+          try { row = drawer.querySelector('[data-key="' + CSS.escape(giftLine.key) + '"]'); } catch (e) {}
+          if (!row) {
+            var link = drawer.querySelector('a[href*="/products/' + this.gift.handle + '"]');
+            if (link && !this.ui.contains(link)) { try { row = link.closest(this.sel.row); } catch (e) {} }
+          }
+          if (row && !this.ui.contains(row)) {
+            if (!row.classList.contains('fsb-gift-row')) row.classList.add('fsb-gift-row');
+            row.querySelectorAll('[class*="quantity"]').forEach(function (q) {
+              var outer = q.parentElement && q.parentElement.closest('[class*="quantity"]');
+              if ((!outer || !row.contains(outer)) && !q.classList.contains('fsb-hidden')) q.classList.add('fsb-hidden');
+            });
+            if (!row.querySelector('.fsb-badge')) {
+              var title = Array.prototype.filter.call(row.querySelectorAll('a[href*="/products/"]'), function (a) { return a.textContent.trim(); })[0];
+              var badge = document.createElement('span');
+              badge.className = 'fsb-badge';
+              badge.textContent = cfg.text.giftBadge;
+              if (title) title.insertAdjacentElement('afterend', badge);
+            }
+          }
+        }
+
+        // total: crossed-out original + "You're saving"
+        var total = this.findTotal();
+        var saving = (cart.original_total_price || 0) - (cart.total_price || 0);
+        if (total) {
+          var was = total.querySelector('.fsb-was');
+          var line = total.parentElement && total.parentElement.nextElementSibling;
+          var savingEl = line && line.classList.contains('fsb-saving') ? line : null;
+          if (cfg.showSavings && saving > 0) {
+            var wasText = this.money(cart.original_total_price);
+            if (!was) { was = document.createElement('s'); was.className = 'fsb-was'; total.prepend(was); }
+            if (was.textContent !== wasText) was.textContent = wasText;
+            var saveHTML = esc(cfg.text.savings).replace('[amount]', '<b>' + esc(this.money(saving)) + '</b>');
+            if (!savingEl) {
+              savingEl = document.createElement('p');
+              savingEl.className = 'fsb-saving';
+              total.parentElement.insertAdjacentElement('afterend', savingEl);
+            }
+            if (savingEl.innerHTML !== saveHTML) savingEl.innerHTML = saveHTML;
+          } else {
+            if (was) was.remove();
+            if (savingEl) savingEl.remove();
+          }
+        }
+      }
+    }
+
+    customElements.define('free-shipping-bar', FreeShippingBar);
+  })();
+{% endjavascript %}
+
+{% schema %}
+{
+  "name": "Free shipping bar",
+  "tag": "div",
+  "class": "fsb-section",
+  "enabled_on": { "groups": ["footer", "header"] },
+  "settings": [
+    { "type": "paragraph", "content": "Shows inside the cart drawer. Progress counts the cart total before discounts. Set up the matching automatic discounts in Shopify admin (see README)." },
+    {
+      "type": "select", "id": "style", "label": "Bar style", "default": "track",
+      "options": [
+        { "value": "track", "label": "Milestone track (one bar with icons)" },
+        { "value": "segments", "label": "Step segments (one bar per reward)" }
+      ]
+    },
+
+    { "type": "header", "content": "Step 1" },
+    { "type": "number", "id": "step_1_amount", "label": "Unlocks at (store currency). 0 turns the step off.", "default": 65 },
+    { "type": "text", "id": "step_1_label", "label": "Label under the bar", "default": "Free shipping" },
+    { "type": "text", "id": "step_1_reward", "label": "Reward in the message", "default": "free shipping" },
+    { "type": "select", "id": "step_1_icon", "label": "Icon", "default": "truck", "options": [
+      { "value": "truck", "label": "Truck" }, { "value": "percent", "label": "Percent" }, { "value": "gift", "label": "Gift" }, { "value": "star", "label": "Star" }, { "value": "heart", "label": "Heart" } ] },
+
+    { "type": "header", "content": "Step 2" },
+    { "type": "number", "id": "step_2_amount", "label": "Unlocks at (store currency). 0 turns the step off.", "default": 100 },
+    { "type": "text", "id": "step_2_label", "label": "Label under the bar", "default": "10% off" },
+    { "type": "text", "id": "step_2_reward", "label": "Reward in the message", "default": "10% off" },
+    { "type": "select", "id": "step_2_icon", "label": "Icon", "default": "percent", "options": [
+      { "value": "truck", "label": "Truck" }, { "value": "percent", "label": "Percent" }, { "value": "gift", "label": "Gift" }, { "value": "star", "label": "Star" }, { "value": "heart", "label": "Heart" } ] },
+
+    { "type": "header", "content": "Step 3" },
+    { "type": "number", "id": "step_3_amount", "label": "Unlocks at (store currency). 0 turns the step off.", "default": 150 },
+    { "type": "text", "id": "step_3_label", "label": "Label under the bar", "default": "20% off" },
+    { "type": "text", "id": "step_3_reward", "label": "Reward in the message", "default": "20% off" },
+    { "type": "select", "id": "step_3_icon", "label": "Icon", "default": "percent", "options": [
+      { "value": "truck", "label": "Truck" }, { "value": "percent", "label": "Percent" }, { "value": "gift", "label": "Gift" }, { "value": "star", "label": "Star" }, { "value": "heart", "label": "Heart" } ] },
+
+    { "type": "header", "content": "Step 4" },
+    { "type": "number", "id": "step_4_amount", "label": "Unlocks at (store currency). 0 turns the step off.", "default": 185 },
+    { "type": "text", "id": "step_4_label", "label": "Label under the bar", "default": "Free gift" },
+    { "type": "text", "id": "step_4_reward", "label": "Reward in the message", "default": "a free gift" },
+    { "type": "select", "id": "step_4_icon", "label": "Icon", "default": "gift", "options": [
+      { "value": "truck", "label": "Truck" }, { "value": "percent", "label": "Percent" }, { "value": "gift", "label": "Gift" }, { "value": "star", "label": "Star" }, { "value": "heart", "label": "Heart" } ] },
+
+    { "type": "header", "content": "Free gift" },
+    { "type": "product", "id": "gift_product", "label": "Gift product" },
+    { "type": "select", "id": "gift_step", "label": "Gift unlocks at", "default": "4", "options": [
+      { "value": "1", "label": "Step 1" }, { "value": "2", "label": "Step 2" }, { "value": "3", "label": "Step 3" }, { "value": "4", "label": "Step 4" } ] },
+    { "type": "text", "id": "gift_locked", "label": "Locked gift message", "default": "Add [amount] more to unlock" },
+    { "type": "text", "id": "gift_unlocked", "label": "Unlocked gift message", "default": "Unlocked! It's in your cart." },
+    { "type": "text", "id": "gift_badge", "label": "Gift badge", "default": "FREE GIFT" },
+
+    { "type": "header", "content": "Messages" },
+    { "type": "text", "id": "msg_progress", "label": "Progress message", "default": "Add [amount] more to get [reward]!", "info": "[amount] = how much more to spend, [reward] = the next step's reward" },
+    { "type": "text", "id": "msg_complete", "label": "All steps unlocked", "default": "Free shipping, 20% off & a free gift unlocked!" },
+    { "type": "checkbox", "id": "show_savings", "label": "Show savings at the cart total", "default": true },
+    { "type": "text", "id": "savings_text", "label": "Savings message", "default": "You're saving [amount]" },
+    { "type": "checkbox", "id": "show_when_empty", "label": "Show bar when the cart is empty", "default": false },
+    { "type": "checkbox", "id": "confetti", "label": "Confetti when a step unlocks", "default": true },
+
+    { "type": "header", "content": "Colors" },
+    { "type": "color", "id": "color_accent", "label": "Bar fill", "default": "#d62f2f" },
+    { "type": "color", "id": "color_track", "label": "Bar background", "default": "#e7e1d9" },
+    { "type": "color", "id": "color_done", "label": "Unlocked checkmarks and savings", "default": "#2e7d4f" },
+    { "type": "color", "id": "color_bg", "label": "Panel background", "default": "#faf5f0" },
+    { "type": "color", "id": "color_text", "label": "Text", "default": "#1f1f1f" },
+
+    { "type": "header", "content": "Theme compatibility (advanced)" },
+    { "type": "paragraph", "content": "Leave blank. Only fill these in if the bar doesn't show up or the gift row isn't styled in your theme's cart drawer." },
+    { "type": "text", "id": "drawer_selector", "label": "Cart drawer selector" },
+    { "type": "text", "id": "mount_selector", "label": "Insert the bar before this element" },
+    { "type": "text", "id": "row_selector", "label": "Cart line row selector" },
+    { "type": "text", "id": "total_selector", "label": "Cart total value selector" }
+  ],
+  "presets": [{ "name": "Free shipping bar" }]
+}
+{% endschema %}
